@@ -7,6 +7,9 @@ const PAGE_UI = {
   newHotTab: "new",
   attrDim: "color",
   hotTab: "site",
+  mcTab: "dynamic",
+  pricingCountry: "US",
+  mappingTab: "dict",
 };
 
 function pageFilters(fields, actionsHtml = "") {
@@ -117,8 +120,33 @@ function thumb(label, hue) {
   return `<div class="prod-thumb" style="--hue:${hue}" aria-hidden="true">${label.slice(0, 1)}</div>`;
 }
 
-/* ——— 监控报告：竞品网站动态 ——— */
+/* ——— 监控报告：竞品网站动态（tab 容器：动态明细 / 竞品热榜 / 上新趋势） ——— */
 function renderMonitorCompetitor() {
+  const tab = PAGE_UI.mcTab;
+  const tabs = pageTabs(
+    [
+      { id: "dynamic", label: "竞品动态明细" },
+      { id: "hot", label: "竞品热榜" },
+      { id: "trend", label: "上新趋势" },
+    ],
+    tab,
+    "mcTab"
+  );
+  const body =
+    tab === "hot"
+      ? renderInsightNewHot()
+      : tab === "trend"
+        ? renderInsightTrend()
+        : renderCompetitorDynamic();
+
+  return `
+    <div class="mc-tabbar">${tabs}</div>
+    ${body}
+  `;
+}
+
+/* ——— 竞品动态明细（原竞品网站动态内容） ——— */
+function renderCompetitorDynamic() {
   const rows = [
     ["Birdy Grey", "Dusty Sage Wrap", "BD", "Dusty Sage", "A-Line", "$98", 12, 5, "+7", "上新", "跟款机会", 210],
     ["Azazie Comp", "Burgundy Mermaid", "BD", "Burgundy", "Mermaid", "$119", 8, 3, "+5", "上升", "主力候选", 340],
@@ -596,15 +624,143 @@ function renderInsightRank() {
   `;
 }
 
-/* ——— 定价建议 ——— */
+/* ——— 定价建议：按国家 + 轻量诊断 ——— */
+const PRICING_COUNTRIES = [
+  { id: "US", label: "美国", cur: "$", fx: 1.0 },
+  { id: "UK", label: "英国", cur: "£", fx: 0.82 },
+  { id: "CA", label: "加拿大", cur: "C$", fx: 1.35 },
+  { id: "AU", label: "澳大利亚", cur: "A$", fx: 1.5 },
+  { id: "DE", label: "德国", cur: "€", fx: 0.92 },
+  { id: "FR", label: "法国", cur: "€", fx: 0.92 },
+];
+
+/** 基准（USD）；dumping 标记该主题在这些市场存在竞品异常低价（疑倾销） */
+const PRICING_BASE = [
+  { theme: "Dusty Sage · A-Line", compMedian: 95, compLow: 88, compHigh: 105, azPrice: 89, addToCartIdx: 1.12, dumping: [] },
+  { theme: "Burgundy · Mermaid", compMedian: 118, compLow: 110, compHigh: 130, azPrice: 119, addToCartIdx: 1.0, dumping: [] },
+  { theme: "Champagne · Satin", compMedian: 96, compLow: 85, compHigh: 105, azPrice: 109, addToCartIdx: 0.82, dumping: ["DE"] },
+  { theme: "Emerald · Ball-Gown", compMedian: 132, compLow: 120, compHigh: 145, azPrice: 129, addToCartIdx: 1.06, dumping: [] },
+  { theme: "Navy · Column", compMedian: 96, compLow: 88, compHigh: 112, azPrice: 98, addToCartIdx: 0.9, dumping: ["AU", "CA"] },
+];
+
+/** 价带分布（代表性，跨国一致；边界按币种换算） */
+const PRICING_BANDS = { comp: [18, 42, 36, 21, 9], az: [22, 48, 28, 14, 5] };
+const BAND_BOUNDS = [[60, 79], [80, 99], [100, 119], [120, 139], [140, null]];
+
+function pricingCountry() {
+  return PRICING_COUNTRIES.find((c) => c.id === PAGE_UI.pricingCountry) || PRICING_COUNTRIES[0];
+}
+
+function money(cur, n) {
+  return `${cur}${Math.round(n)}`;
+}
+
+function buildPricingRows(country) {
+  const k = PRICING_COUNTRIES.findIndex((c) => c.id === country.id);
+  const fx = country.fx;
+  return PRICING_BASE.map((b, i) => {
+    const azTweak = 1 + (((k * 7 + i * 13) % 11) - 5) / 100; // -5%..+5% 市场差异
+    const cartTweak = (((k + i) % 5) - 2) * 0.05;
+    return {
+      theme: b.theme,
+      cur: country.cur,
+      compMedian: Math.round(b.compMedian * fx),
+      compLow: Math.round(b.compLow * fx),
+      compHigh: Math.round(b.compHigh * fx),
+      azPrice: Math.round(b.azPrice * fx * azTweak),
+      addToCartIdx: Math.max(0.6, +(b.addToCartIdx + cartTweak).toFixed(2)),
+      compLowFlag: (b.dumping || []).includes(country.id),
+    };
+  });
+}
+
+/** 轻量定价诊断：竞品价带中位 vs AZ现价 + 加购率相对价带均值 + 竞品倾销标记 */
+function diagnosePricing(r) {
+  const cur = r.cur;
+  const diffPct = Math.round(((r.azPrice - r.compMedian) / r.compMedian) * 100);
+  const cartPct = Math.round((r.addToCartIdx - 1) * 100);
+
+  if (r.compLowFlag && r.azPrice >= r.compMedian) {
+    return {
+      tag: "竞品低价(不跟)",
+      tone: "purple",
+      action: "维持",
+      suggest: r.azPrice,
+      basis: `竞品中位 ${money(cur, r.compMedian)} 明显低于合理价带（疑低价倾销）→ 不建议跟价，维持 ${money(cur, r.azPrice)} 并强化差异化（面料/版型/服务）`,
+    };
+  }
+  if (diffPct >= 6 && r.addToCartIdx < 0.95) {
+    const s = Math.round(r.compMedian * 1.03);
+    return {
+      tag: "定价过高",
+      tone: "orange",
+      action: "下调",
+      suggest: s,
+      basis: `AZ ${money(cur, r.azPrice)} 高于竞品中位 ${money(cur, r.compMedian)}（+${diffPct}%）且加购率低于价带均值 ${Math.abs(cartPct)}% → 判定我方定价过高，建议下调至 ${money(cur, s)}`,
+    };
+  }
+  if (diffPct <= -6 && r.addToCartIdx >= 1.05) {
+    const s = Math.round(r.compMedian * 0.98);
+    return {
+      tag: "定价过低",
+      tone: "blue",
+      action: "上调",
+      suggest: s,
+      basis: `AZ ${money(cur, r.azPrice)} 低于竞品中位 ${money(cur, r.compMedian)}（${diffPct}%）且加购率高于均值 ${cartPct}% → 存在提价空间，建议上调至 ${money(cur, s)}`,
+    };
+  }
+  return {
+    tag: "合理",
+    tone: "green",
+    action: "维持",
+    suggest: r.azPrice,
+    basis: `AZ ${money(cur, r.azPrice)} 与竞品中位 ${money(cur, r.compMedian)} 基本一致、加购率正常 → 维持现价`,
+  };
+}
+
+function pricingMedian(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
 function renderInsightPricing() {
+  const country = pricingCountry();
+  const cur = country.cur;
+  const rows = buildPricingRows(country);
+  const diags = rows.map((r) => diagnosePricing(r));
+
+  const compMed = pricingMedian(rows.map((r) => r.compMedian));
+  const azMed = pricingMedian(rows.map((r) => r.azPrice));
+  const spread = azMed - compMed;
+  const adjustCount = diags.filter((d) => d.action !== "维持").length;
+  const avgCart = Math.round((rows.reduce((s, r) => s + r.addToCartIdx, 0) / rows.length - 1) * 100);
+
+  const bandItems = (counts) =>
+    BAND_BOUNDS.map((b, i) => {
+      const lo = Math.round(b[0] * country.fx);
+      const name = b[1] === null ? `${cur}${lo}+` : `${cur}${lo}-${Math.round(b[1] * country.fx)}`;
+      return { name, value: counts[i] };
+    });
+
+  const countryTabs = pageTabs(
+    PRICING_COUNTRIES.map((c) => ({ id: c.id, label: `${c.label} ${c.cur}` })),
+    country.id,
+    "pricingCountry"
+  );
+
   return `
     <div class="page-stack">
-      <section class="kpi-row">
-        ${renderKpiCard({ id: "IP1", label: "竞品中位价", value: "$108", sub: "BD 礼服" })}
-        ${renderKpiCard({ id: "IP2", label: "AZ 中位价", value: "$99", sub: "同品类" })}
-        ${renderKpiCard({ id: "IP3", label: "建议调价 SKU", value: "17", sub: "偏低 / 偏高" })}
-        ${renderKpiCard({ id: "IP4", label: "价差风险", value: "6", sub: "显著偏离带" })}
+      <section class="card card-pad">
+        ${countryTabs}
+        <p class="muted" style="margin:10px 0 0;">当前市场：${country.label} · 计价币种 ${cur} · 价格已按市场换算，诊断基于各市场竞品价带与本地加购率</p>
+      </section>
+      <section class="kpi-row kpi-row--5">
+        ${renderKpiCard({ id: "IP1", label: "竞品中位价", value: money(cur, compMed), sub: `${country.label} · 同品类` })}
+        ${renderKpiCard({ id: "IP2", label: "AZ 中位价", value: money(cur, azMed), sub: "同品类" })}
+        ${renderKpiCard({ id: "IP3", label: "AZ−竞品价差", value: `${spread >= 0 ? "+" : ""}${money(cur, spread)}`, sub: spread > 0 ? "整体偏高" : spread < 0 ? "整体偏低" : "基本持平" })}
+        ${renderKpiCard({ id: "IP4", label: "建议调价主题", value: String(adjustCount), sub: "过高 / 过低 / 需处置" })}
+        ${renderKpiCard({ id: "IP5", label: "加购率对比", value: `${avgCart >= 0 ? "+" : ""}${avgCart}%`, sub: "相对价带均值" })}
       </section>
       ${pageFilters([
         { label: "业务线", options: ["BD", "AT", "全部"] },
@@ -613,51 +769,51 @@ function renderInsightPricing() {
       ])}
       <section class="page-split">
         <article class="voc-panel">
-          <h4>竞品价格带分布</h4>
-          ${pageMiniBars([
-            { name: "$60-79", value: 18 },
-            { name: "$80-99", value: 42 },
-            { name: "$100-119", value: 36 },
-            { name: "$120-139", value: 21 },
-            { name: "$140+", value: 9 },
-          ])}
+          <h4>竞品价格带分布 · ${country.label}</h4>
+          ${pageMiniBars(bandItems(PRICING_BANDS.comp))}
         </article>
         <article class="voc-panel">
-          <h4>AZ 当前价格带</h4>
-          ${pageMiniBars(
-            [
-              { name: "$60-79", value: 22 },
-              { name: "$80-99", value: 48 },
-              { name: "$100-119", value: 28 },
-              { name: "$120-139", value: 14 },
-              { name: "$140+", value: 5 },
-            ],
-            "#0ca678"
-          )}
+          <h4>AZ 当前价格带 · ${country.label}</h4>
+          ${pageMiniBars(bandItems(PRICING_BANDS.az), "#0ca678")}
         </article>
       </section>
+      <section class="card card-pad pricing-basis">
+        <div class="card-head">
+          <div>
+            <h3>定价依据 · 计算方式（轻量模型）</h3>
+            <p>用于判断「我方定价过高」还是「外部竞品定价过低」，并给出建议价</p>
+          </div>
+        </div>
+        <ol class="pricing-basis__list">
+          <li><strong>① 竞品价带中位 vs AZ 现价</strong>：计算价差百分比。AZ 高于中位 ≥6% 记为偏高，低于中位 ≥6% 记为偏低。</li>
+          <li><strong>② 加购率相对价带均值</strong>：加购率低于均值说明高价抑制转化（支持「定价过高」），高于均值说明有提价空间（支持「定价过低」）。</li>
+          <li><strong>③ 竞品价带异常低标记（倾销）</strong>：若竞品中位显著低于合理价带，判为外部低价倾销，不建议跟价，改走差异化。</li>
+          <li><strong>建议价</strong>：向竞品中位靠拢（偏高下调、偏低上调），且不低于毛利下限（示意）；倾销市场维持现价。</li>
+        </ol>
+      </section>
       ${pageTable(
-        ["机会主题", "竞品价带", "AZ 现价", "建议价", "价差", "动作", "操作"],
-        [
-          ["Dusty Sage · A-Line", "$95-110", "$89", "$99", "+$10", "上调", "应用建议"],
-          ["Burgundy · Mermaid", "$110-130", "$119", "$119", "$0", "维持", "应用建议"],
-          ["Champagne · Satin", "$85-105", "$109", "$99", "-$10", "下调", "应用建议"],
-          ["Emerald · Ball-Gown", "$120-145", "$129", "$135", "+$6", "上调", "应用建议"],
-          ["Navy · Column", "$70-90", "$98", "$88", "-$10", "下调", "应用建议"],
-        ]
-          .map(
-            (r) => `
+        ["机会主题", "竞品价带", "竞品中位", "AZ 现价", "加购率对比", "诊断", "建议价", "依据", "操作"],
+        rows
+          .map((r, i) => {
+            const d = diags[i];
+            const cartPct = Math.round((r.addToCartIdx - 1) * 100);
+            return `
           <tr>
-            <td><span class="cell-title">${r[0]}</span></td>
-            <td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td>
-            <td>${renderTag(r[5], r[5] === "上调" ? "green" : r[5] === "下调" ? "orange" : "muted")}</td>
-            <td><button type="button" class="btn-text" data-toast="price-apply">${r[6]}</button></td>
+            <td><span class="cell-title">${r.theme}</span></td>
+            <td>${money(cur, r.compLow)}-${money(cur, r.compHigh)}</td>
+            <td>${money(cur, r.compMedian)}</td>
+            <td>${money(cur, r.azPrice)}</td>
+            <td class="${cartPct < 0 ? "score-down" : "score-up"}">${cartPct >= 0 ? "+" : ""}${cartPct}%</td>
+            <td>${renderTag(d.tag, d.tone)}</td>
+            <td><strong>${money(cur, d.suggest)}</strong></td>
+            <td><span class="cell-sub" style="margin:0;display:inline;max-width:320px;">${d.basis}</span></td>
+            <td><button type="button" class="btn-text" data-toast="price-apply">${d.action === "维持" ? "维持现价" : "应用建议"}</button></td>
           </tr>
-        `
-          )
+        `;
+          })
           .join(""),
-        "建议价格表格",
-        "结合竞品价带生成"
+        "分国家建议价与诊断",
+        `${country.label} · 结合竞品价带、加购率与倾销标记生成`
       )}
     </div>
   `;
@@ -853,6 +1009,30 @@ function renderCfgLine() {
   `;
 }
 
+/* ——— 数据映射（tab 容器：属性字典映射 / 类目映射） ——— */
+function renderCfgMapping() {
+  const tab = PAGE_UI.mappingTab;
+  const tabs = pageTabs(
+    [
+      { id: "dict", label: "属性字典映射" },
+      { id: "category", label: "类目映射" },
+    ],
+    tab,
+    "mappingTab"
+  );
+  const note =
+    tab === "category"
+      ? "类目映射：把竞品雷达的类目体系对齐到选款系统「品类」下拉，创建提案时可自动带出正确品类。"
+      : "属性字典映射：把竞品/雷达原始属性值（颜色/廓形/领型/面料）归一到盘古 md_attribute_dict 标准值，保证机会池筛选、属性榜单与三信号交叉分析口径一致。";
+  const body = tab === "category" ? renderCfgCategory() : renderCfgDict();
+
+  return `
+    <div class="mc-tabbar">${tabs}</div>
+    <p class="muted" style="margin:-6px 2px 2px;">${note}</p>
+    ${body}
+  `;
+}
+
 function renderCfgDict() {
   return `
     <div class="page-stack">
@@ -972,8 +1152,6 @@ function renderCfgCategory() {
 
 const EXTRA_PAGE_RENDERERS = {
   "monitor-competitor": renderMonitorCompetitor,
-  "insight-new-hot": renderInsightNewHot,
-  "insight-trend": renderInsightTrend,
   "insight-attr": renderInsightAttr,
   "insight-rank": renderInsightRank,
   "insight-pricing": renderInsightPricing,
@@ -986,9 +1164,8 @@ const EXTRA_PAGE_RENDERERS = {
   "listing-review": renderListingReview,
   "listing-users": () => renderUsersPage("listing"),
   "cfg-line": renderCfgLine,
-  "cfg-dict": renderCfgDict,
+  "cfg-mapping": renderCfgMapping,
   "cfg-weight": renderCfgWeight,
-  "cfg-category": renderCfgCategory,
   "cfg-users": () => renderUsersPage("config"),
 };
 

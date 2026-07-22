@@ -12,7 +12,7 @@ const NAV_TREE = [
         label: "竞品网站动态",
         crumb: "监控报告 / 竞品网站动态",
         title: "竞品网站动态",
-        desc: "雷达上新 / 下架 / 排名监控，支持加入机会池。",
+        desc: "雷达上新 / 下架 / 排名监控 + 竞品热榜 + 上新趋势，支持加入机会池。",
       },
       {
         id: "monitor-internal",
@@ -39,20 +39,6 @@ const NAV_TREE = [
         crumb: "分析洞察 / 机会池",
         title: "机会池",
         desc: "竞品网站 · 产品数据 · 社媒舆情三信号融合主入口 · 形成可执行选品方案",
-      },
-      {
-        id: "insight-new-hot",
-        label: "竞品热榜",
-        crumb: "分析洞察 / 竞品热榜",
-        title: "竞品热榜",
-        desc: "竞品上新、热榜与排名涨跌，标记是否进入机会池。",
-      },
-      {
-        id: "insight-trend",
-        label: "上新趋势",
-        crumb: "分析洞察 / 上新趋势",
-        title: "上新趋势",
-        desc: "周次趋势、品类占比与站点上新对比。",
       },
       {
         id: "insight-attr",
@@ -126,11 +112,11 @@ const NAV_TREE = [
         desc: "JP / BD / AT / WD / PROM",
       },
       {
-        id: "cfg-dict",
-        label: "属性字典映射",
-        crumb: "配置 / 属性字典映射",
-        title: "属性字典映射",
-        desc: "盘古 md_attribute_dict",
+        id: "cfg-mapping",
+        label: "数据映射",
+        crumb: "配置 / 数据映射",
+        title: "数据映射",
+        desc: "属性字典映射 + 类目映射：统一竞品/雷达原始值到盘古标准值与选款品类下拉。",
       },
       {
         id: "cfg-weight",
@@ -138,13 +124,6 @@ const NAV_TREE = [
         crumb: "配置 / 打分权重",
         title: "打分权重",
         desc: "Trend / Internal / Gap / Risk",
-      },
-      {
-        id: "cfg-category",
-        label: "类目映射",
-        crumb: "配置 / 类目映射",
-        title: "类目映射",
-        desc: "雷达类目 → 选款品类下拉",
       },
       {
         id: "cfg-users",
